@@ -5,7 +5,7 @@ import json
 # ────────────────────────────────────────────────
 # Configuration
 # ────────────────────────────────────────────────
-TENANT_ID = "ce49a0fe-8e3e-4a5b-b5da-99abccbd8700"
+TENANT_ID = ""
 DATA_AGENT_URL = "<your_fabric_data_agent_url>" 
 QUESTION = "Question"
 
@@ -51,3 +51,4 @@ try:
         print("No assistant response found.")
 except Exception as e:
     print(f"Error getting run details: {e}")
+
