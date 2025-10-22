@@ -1,12 +1,11 @@
-#!/usr/bin/env python3
 """
-Fabric Data Agent Flask Chat Interface
+Fabric Data Agent Flask Chat Interface (Clean UI + Asynchronous Chat)
 """
 
 import os
 import logging
-from flask import Flask, render_template_string, request, session, redirect, url_for
-from fabric_data_agent_client import FabricDataAgentClient
+from flask import Flask, render_template_string, request, session, jsonify, redirect, url_for
+from fabric_data_agent_client import FabricDataAgentClient  # Your existing client
 
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO)
@@ -25,14 +24,14 @@ client = None
 def init_fabric_client():
     global client
     try:
-        logger.info("🔐 Initializing Fabric Data Agent Client...")
+        logger.info("Initializing Fabric Data Agent Client.")
         client = FabricDataAgentClient(
             tenant_id=TENANT_ID,
             data_agent_url=DATA_AGENT_URL
         )
-        logger.info("✅ Authentication successful!")
+        logger.info("Authentication successful.")
     except Exception as e:
-        logger.error(f"❌ Authentication failed: {e}")
+        logger.error(f"Authentication failed: {e}")
         client = None
 
 # --- HTML Template ---
@@ -42,26 +41,151 @@ HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <title>Fabric Data Agent Chat</title>
 <style>
-/* Styling omitted for brevity */
-body { font-family: Arial; background: #f3f3f3; }
-header { display: flex; align-items: center; padding: 10px; background: #222; color: white; }
-.chat-container { max-width: 600px; margin: auto; background: white; border-radius: 5px; padding: 20px; margin-top: 20px; }
-.chat-box { max-height: 400px; overflow-y: auto; }
-.message { margin-bottom: 10px; }
-.message.user .bubble { background: #007bff; color: white; }
-.message.agent .bubble { background: #e5e5ea; }
-.bubble { padding: 10px 15px; border-radius: 15px; display: inline-block; }
-.input-bar { display: flex; margin-top: 10px; }
-textarea { flex: 1; resize: none; padding: 10px; border-radius: 5px; border: 1px solid #ccc; }
-.send-btn { background: #007bff; border: none; color: white; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+body {
+    font-family: Arial, sans-serif;
+    background: #f3f3f3;
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+header {
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+    background: #222;
+    color: white;
+    height: 50px;
+}
+header h1 {
+    font-size: 20px;
+    margin: 0;
+}
+
+.chat-container {
+    max-width: 1100px;
+    margin: 20px auto;
+    background: white;
+    border-radius: 5px;
+    padding: 20px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+
+.chat-box {
+    max-height: 600px;
+    overflow-y: auto;
+    flex: 1;
+    padding-bottom: 80px;
+}
+
+.message {
+    margin-bottom: 10px;
+    display: flex;
+}
+
+.message.user {
+    justify-content: flex-end;
+}
+.message.agent {
+    justify-content: flex-start;
+}
+
+.bubble {
+    padding: 12px 18px;
+    border-radius: 15px;
+    display: inline-block;
+    max-width: 80%;
+    word-wrap: break-word;
+}
+
+.message.user .bubble {
+    background: #007bff;
+    color: white;
+    border-bottom-right-radius: 0;
+}
+
+.message.agent .bubble {
+    background: #e5e5ea;
+    color: black;
+    border-bottom-left-radius: 0;
+}
+
+.input-bar {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    max-width: 1200px;
+    padding: 0 20px;
+}
+
+textarea {
+    flex: 1;
+    max-width: 1000px;
+    min-height: 38px;
+    max-height: 50px;
+    resize: none;
+    padding: 10px 14px;
+    border-radius: 25px;
+    border: 1px solid #ccc;
+    font-size: 16px;
+    overflow-y: auto;
+    line-height: 1.4;
+    box-sizing: border-box;
+    transition: all 0.2s ease;
+}
+
+.send-btn {
+    background: #007bff;
+    border: none;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 25px;
+    cursor: pointer;
+    margin-left: 10px;
+    font-size: 16px;
+}
+.send-btn:disabled {
+    background: #5a9bf9;
+    cursor: not-allowed;
+}
+
+.typing .bubble {
+    font-style: italic;
+    color: gray;
+    background: #f0f0f0;
+}
+
+.clear-btn {
+    background-color: transparent;
+    border: 1px solid #ccc;
+    color: #fff;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+.clear-btn:hover {
+    background-color: #555;
+    border-color: #888;
+}
 </style>
 </head>
 <body>
     <header>
-        <h1>🧩 Fabric Data Agent</h1>
+        <h1>Fabric Data Agent</h1>
         <div style="margin-left:auto;">
             <form action="{{ url_for('clear_chat') }}" method="post">
-                <button type="submit">Clear Chat</button>
+                <button type="submit" class="clear-btn">Clear Chat</button>
             </form>
         </div>
     </header>
@@ -76,63 +200,167 @@ textarea { flex: 1; resize: none; padding: 10px; border-radius: 5px; border: 1px
                 {% endfor %}
             {% else %}
                 <div class="message agent">
-                    <div class="bubble">👋 Hello! I’m your Fabric Data Agent. Ask me something to begin.</div>
+                    <div class="bubble">Hello! I’m your Fabric Data Agent. Ask me something to begin.</div>
                 </div>
             {% endif %}
         </div>
-
-        <form method="post" class="input-bar">
-            <textarea name="question" placeholder="Type your question here..." required></textarea>
-            <button type="submit" class="send-btn">Send</button>
-        </form>
     </div>
 
-    <script>
-        const chatBox = document.getElementById('chatBox');
-        chatBox.scrollTop = chatBox.scrollHeight;
-    </script>
-</body>
-</html>"""
+    <form id="chatForm" class="input-bar">
+        <textarea name="question" placeholder="Type your question here..." required></textarea>
+        <button type="submit" class="send-btn" id="sendBtn">Send</button>
+    </form>
 
-@app.route("/", methods=["GET", "POST"])
+<script>
+    const chatBox = document.getElementById('chatBox');
+    const chatForm = document.getElementById('chatForm');
+    const sendBtn = document.getElementById('sendBtn');
+    const textarea = chatForm.querySelector('textarea');
+
+    function scrollToBottom() {
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    scrollToBottom();
+
+    chatForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        const question = textarea.value.trim();
+        if (!question) return;
+
+        // Disable send button
+        sendBtn.disabled = true;
+
+        // Append user's message immediately
+        const userMsgDiv = document.createElement('div');
+        userMsgDiv.className = 'message user';
+        userMsgDiv.innerHTML = <div class="bubble">${escapeHtml(question)}</div>;
+        chatBox.appendChild(userMsgDiv);
+        scrollToBottom();
+
+        // Append typing indicator
+        const typingDiv = document.createElement('div');
+        typingDiv.className = 'message agent typing-message';
+        typingDiv.innerHTML = '<div class="bubble typing" id="typingBubble">.</div>';
+        chatBox.appendChild(typingDiv);
+        scrollToBottom();
+
+        let dotCount = 1;
+        const typingInterval = setInterval(() => {
+            dotCount = (dotCount % 3) + 1;
+            document.getElementById('typingBubble').textContent = '.'.repeat(dotCount);
+        }, 500);
+
+        // Send the question to server via AJAX (fetch)
+        fetch('{{ url_for("ask") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ question: question })
+        })
+        .then(response => response.json())
+        .then(data => {
+            clearInterval(typingInterval);
+
+            // Remove typing indicator
+            chatBox.removeChild(typingDiv);
+
+            // Append agent response
+            const agentMsgDiv = document.createElement('div');
+            agentMsgDiv.className = 'message agent';
+            agentMsgDiv.innerHTML = <div class="bubble">${escapeHtml(data.answer)}</div>;
+            chatBox.appendChild(agentMsgDiv);
+
+            // Scroll to bottom and enable send button
+            scrollToBottom();
+            sendBtn.disabled = false;
+            textarea.value = '';
+            textarea.style.height = 'auto';
+            textarea.focus();
+        })
+        .catch(error => {
+            clearInterval(typingInterval);
+            chatBox.removeChild(typingDiv);
+
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'message agent';
+            errorDiv.innerHTML = <div class="bubble">Error: Unable to get response from the server.</div>;
+            chatBox.appendChild(errorDiv);
+
+            scrollToBottom();
+            sendBtn.disabled = false;
+        });
+    });
+
+    // Auto-expand textarea
+    textarea.addEventListener('input', function () {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+    });
+
+    // Helper to escape HTML to prevent XSS
+    function escapeHtml(text) {
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+        return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+    }
+</script>
+</body>
+</html>
+"""
+
+# --- Routes ---
+
+@app.route("/", methods=["GET"])
 def index():
     if TENANT_ID == "your-tenant-id-here" or DATA_AGENT_URL == "your-data-agent-url-here":
-        return "<h3>❌ Please set TENANT_ID and DATA_AGENT_URL first.</h3>"
+        return "<h3>Please set TENANT_ID and DATA_AGENT_URL environment variables first.</h3>"
 
     if "chat" not in session:
         session["chat"] = []
     chat = session["chat"]
-
-    if request.method == "POST":
-        question = request.form.get("question")
-        if question:
-            chat.append({"role": "user", "text": question})
-            session["chat"] = chat
-
-            if client is None:
-                logger.warning("⚠ Client is None when trying to handle question.")
-                chat.append({"role": "agent", "text": "⚠ Data Agent client not initialized. Please restart the app."})
-                session["chat"] = chat
-                return render_template_string(HTML, chat=chat)
-
-            try:
-                logger.info("📡 Sending question to Fabric Data Agent...")
-                response = client.ask(question)
-                chat.append({"role": "agent", "text": response})
-            except Exception as e:
-                logger.error(f"❌ Error while querying the agent: {e}")
-                chat.append({"role": "agent", "text": f"❌ Error: {e}"})
-
-            session["chat"] = chat
-
     return render_template_string(HTML, chat=chat)
+
+@app.route("/ask", methods=["POST"])
+def ask():
+    if client is None:
+        logger.warning("Data Agent client not initialized.")
+        return jsonify({"answer": "Data Agent client is not initialized. Please restart the app."})
+
+    data = request.get_json()
+    question = data.get("question", "").strip()
+    if not question:
+        return jsonify({"answer": "Please provide a valid question."})
+
+    chat = session.get("chat", [])
+    chat.append({"role": "user", "text": question})
+
+    try:
+        logger.info("Sending question to Fabric Data Agent.")
+        response = client.ask(question)
+        chat.append({"role": "agent", "text": response})
+        session["chat"] = chat
+        return jsonify({"answer": response})
+    except Exception as e:
+        logger.error(f"Error querying the agent: {e}")
+        error_msg = f"Error: {e}"
+        chat.append({"role": "agent", "text": error_msg})
+        session["chat"] = chat
+        return jsonify({"answer": error_msg})
 
 @app.route("/clear", methods=["POST"])
 def clear_chat():
     session.pop("chat", None)
     return redirect(url_for("index"))
 
+# --- Entry Point ---
 if _name_ == "_main_":
-    logger.info("🚀 Starting Fabric Data Agent Flask Chat Interface...")
+    logger.info("Starting Fabric Data Agent Flask Chat Interface.")
     init_fabric_client()
     app.run(host="127.0.0.1", port=8080, debug=True, use_reloader=False)
