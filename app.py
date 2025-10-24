@@ -6,12 +6,14 @@ Fabric Data Agent Flask Chat Interface (Clean UI + Authentication on Startup + A
 import os
 import logging
 from flask import Flask, render_template_string, request, session, jsonify, redirect, url_for
-from fabric_data_agent_client import FabricDataAgentClient  # Your existing client
+from azure.identity import ManagedIdentityCredential
+from fabric_data_agent_client import FabricDataAgentClient
 
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# --- Flask Setup ---
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 
@@ -22,18 +24,21 @@ DATA_AGENT_URL = os.getenv("DATA_AGENT_URL", "your-data-agent-url-here")
 # --- Global client instance ---
 client = None
 
-def init_fabric_client():
-    global client
+# --- Entry Point ---
+if __name__ == "__main__":
+    logger.info("Starting Fabric Data Agent Flask Chat Interface with SAMI...")
     try:
-        logger.info("Initializing Fabric Data Agent Client.")
+        credential = ManagedIdentityCredential()
         client = FabricDataAgentClient(
             tenant_id=TENANT_ID,
-            data_agent_url=DATA_AGENT_URL
+            data_agent_url=DATA_AGENT_URL,
+            credential=credential
         )
-        logger.info("Authentication successful.")
+        logger.info("Authentication successful using System Assigned Managed Identity.")
     except Exception as e:
         logger.error(f"Authentication failed: {e}")
         client = None
+    app.run(host="127.0.0.1", port=8080, debug=True, use_reloader=False)
 
 # --- HTML Template ---
 HTML = """<!DOCTYPE html>
@@ -213,7 +218,7 @@ textarea {
     </form>
 
 <script>
-    const chatBox = document.getElementById('chatBox');
+const chatBox = document.getElementById('chatBox');
     const chatForm = document.getElementById('chatForm');
     const sendBtn = document.getElementById('sendBtn');
     const textarea = chatForm.querySelector('textarea');
@@ -359,9 +364,3 @@ def ask():
 def clear_chat():
     session.pop("chat", None)
     return redirect(url_for("index"))
-
-# --- Entry Point ---
-if __name__ == "__main__":
-    logger.info("Starting Fabric Data Agent Flask Chat Interface.")
-    init_fabric_client()
-    app.run(host="127.0.0.1", port=8080, debug=True, use_reloader=False)
