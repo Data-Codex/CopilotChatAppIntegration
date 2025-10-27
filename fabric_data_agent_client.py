@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Fabric Data Agent External Client
+Fabric Data Agent External Client (SAMI Version)
 
 A standalone Python client for calling Microsoft Fabric Data Agents from outside
-of the Fabric environment using interactive browser authentication.
+of the Fabric environment using System Assigned Managed Identity (SAMI).
 
 Requirements:
 - azure-identity
@@ -11,9 +11,9 @@ Requirements:
 - python-dotenv (optional, for environment variables)
 
 Usage:
-1. Set your TENANT_ID and DATA_AGENT_URL in the script or environment variables
-2. Run the script - it will open a browser for authentication
-3. The client will fetch a bearer token and make calls to your data agent
+1. Deploy this script in an Azure-hosted environment with SAMI enabled
+2. Assign the appropriate role to the identity for accessing the Fabric Data Agent
+3. Run the script — it will authenticate silently using SAMI
 """
 
 import time
@@ -22,15 +22,14 @@ import json
 import os
 import warnings
 from typing import Optional
-from azure.identity import InteractiveBrowserCredential
+from azure.identity import ManagedIdentityCredential
 from openai import OpenAI
 
 # Suppress OpenAI Assistants API deprecation warnings
-# (Fabric Data Agents don't support the newer Responses API yet)
 warnings.filterwarnings(
     "ignore",
     category=DeprecationWarning,
-    message=r".*Assistants API is deprecated.*"
+    message=r".Assistants API is deprecated."
 )
 
 # Optional: Load from .env file if available
@@ -43,18 +42,17 @@ except ImportError:
 
 class FabricDataAgentClient:
     """
-    Client for calling Microsoft Fabric Data Agents from external applications.
+    Client for calling Microsoft Fabric Data Agents using System Assigned Managed Identity (SAMI).
     
     This client handles:
-    - Interactive browser authentication with Azure AD
+    - Silent authentication via Azure IMDS
     - Automatic token refresh
     - Bearer token management for API calls
-    - Proper cleanup of resources
     """
     
-    def __init__(self, tenant_id: str, data_agent_url: str):
+    def _init_(self, tenant_id: str, data_agent_url: str):
         """
-        Initialize the Fabric Data Agent client.
+        Initialize the Fabric Data Agent client using SAMI.
         
         Args:
             tenant_id (str): Your Azure tenant ID
@@ -71,7 +69,7 @@ class FabricDataAgentClient:
         if not data_agent_url:
             raise ValueError("data_agent_url is required")
         
-        print(f"Initializing Fabric Data Agent Client...")
+        print("Initializing Fabric Data Agent Client with SAMI...")
         print(f"Tenant ID: {tenant_id}")
         print(f"Data Agent URL: {data_agent_url}")
         
@@ -79,26 +77,16 @@ class FabricDataAgentClient:
     
     def _authenticate(self):
         """
-        Perform interactive browser authentication and get initial token.
+        Authenticate using System Assigned Managed Identity (SAMI).
         """
         try:
-            print("\n🔐 Starting authentication...")
-            print("A browser window will open for you to sign in to your Microsoft account.")
-            
-            # Create credential for interactive authentication
-            self.credential = InteractiveBrowserCredential(
-                tenant_id=self.tenant_id,
-                # Optional: specify redirect_uri if needed
-                # redirect_uri="http://localhost:8400"
-            )
-            
-            # Get initial token
+            print("Authenticating with SAMI...")
+            self.credential = ManagedIdentityCredential()
             self._refresh_token()
-            
-            print("✅ Authentication successful!")
+            print("SAMI authentication successful.")
             
         except Exception as e:
-            print(f"❌ Authentication failed: {e}")
+            print(f"SAMI authentication failed: {e}")
             raise
     
     def _refresh_token(self):
@@ -106,15 +94,15 @@ class FabricDataAgentClient:
         Refresh the authentication token.
         """
         try:
-            print("🔄 Refreshing authentication token...")
+            print("Refreshing token via SAMI...")
             if self.credential is None:
                 raise ValueError("No credential available")
             self.token = self.credential.get_token("https://api.fabric.microsoft.com/.default")
-            print(f"✅ Token obtained, expires at: {time.ctime(self.token.expires_on)}")
+            print(f"Token obtained, expires at: {time.ctime(self.token.expires_on)}")
             
         except Exception as e:
-            print(f"❌ Token refresh failed: {e}")
-            raise
+            print(f"Token refresh failed: {e}")
+            raise
     
     def _get_openai_client(self) -> OpenAI:
         """
