@@ -1,3 +1,8 @@
+
+https://community.fabric.microsoft.com/t5/Fabric-platform/Does-Fabric-Data-agent-support-Managed-Identity-or-Service/m-p/4685958#M15611
+
+
+
 from azure.identity import ManagedIdentityCredential
 from fabric_data_agent_client import FabricDataAgentClient
 import json
@@ -51,4 +56,5 @@ try:
         print("No assistant response found.")
 except Exception as e:
     print(f"Error getting run details: {e}")
+
 
