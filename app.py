@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """
-Fabric Data Agent Flask Chat Interface (Clean UI + Authentication on Startup + Asynchronous Chat)
+Fabric Data Agent Flask Chat Interface (Clean UI + SAMI Authentication + Asynchronous Chat)
 """
 
 import os
 import logging
 from flask import Flask, render_template_string, request, session, jsonify, redirect, url_for
-from azure.identity import ManagedIdentityCredential
 from fabric_data_agent_client import FabricDataAgentClient
 
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(_name_)
 
 # --- Flask Setup ---
-app = Flask(__name__)
+app = Flask(_name_)
 app.secret_key = "supersecretkey"
 
 # --- Configuration ---
@@ -25,14 +24,12 @@ DATA_AGENT_URL = os.getenv("DATA_AGENT_URL", "your-data-agent-url-here")
 client = None
 
 # --- Entry Point ---
-if __name__ == "__main__":
+if _name_ == "_main_":
     logger.info("Starting Fabric Data Agent Flask Chat Interface with SAMI...")
     try:
-        credential = ManagedIdentityCredential()
         client = FabricDataAgentClient(
             tenant_id=TENANT_ID,
-            data_agent_url=DATA_AGENT_URL,
-            credential=credential
+            data_agent_url=DATA_AGENT_URL
         )
         logger.info("Authentication successful using System Assigned Managed Identity.")
     except Exception as e:
@@ -364,3 +361,4 @@ def ask():
 def clear_chat():
     session.pop("chat", None)
     return redirect(url_for("index"))
+
