@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """
-Fabric Data Agent Flask Chat Interface (Clean UI + SAMI Authentication + Asynchronous Chat)
+Azure AI Foundry Flask Chat Interface (Clean UI + Managed Identity + Session-Based Chat + Web UI)
 """
 
 import os
 import logging
 from flask import Flask, render_template_string, request, session, jsonify, redirect, url_for
-from fabric_data_agent_client import FabricDataAgentClient
+from dotenv import load_dotenv
+from azure.ai.inference import ChatCompletionsClient, ChatCompletionsOptions, ChatRequestUserMessage, ChatRequestSystemMessage
+from azure.identity import DefaultAzureCredential
+
+# --- Load environment variables ---
+load_dotenv()
 
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO)
@@ -14,35 +19,38 @@ logger = logging.getLogger(_name_)
 
 # --- Flask Setup ---
 app = Flask(_name_)
-app.secret_key = "supersecretkey"
+app.secret_key = os.urandom(24)
 
 # --- Configuration ---
-TENANT_ID = os.getenv("TENANT_ID", "your-tenant-id-here")
-DATA_AGENT_URL = os.getenv("DATA_AGENT_URL", "your-data-agent-url-here")
+PROJECT_ENDPOINT = os.getenv("PROJECT_ENDPOINT")
+MODEL_DEPLOYMENT_NAME = os.getenv("MODEL_DEPLOYMENT_NAME")
 
-# --- Global client instance ---
+if not PROJECT_ENDPOINT or not MODEL_DEPLOYMENT_NAME:
+    logger.warning("Please set PROJECT_ENDPOINT and MODEL_DEPLOYMENT_NAME in .env")
+
+# --- Global Azure AI Client ---
 client = None
 
-# --- Entry Point ---
-if _name_ == "_main_":
-    logger.info("Starting Fabric Data Agent Flask Chat Interface with SAMI...")
+def init_ai_client():
+    global client
     try:
-        client = FabricDataAgentClient(
-            tenant_id=TENANT_ID,
-            data_agent_url=DATA_AGENT_URL
-        )
-        logger.info("Authentication successful using System Assigned Managed Identity.")
+        logger.info("Initializing Azure AI Foundry ChatCompletionsClient...")
+        credential = DefaultAzureCredential()
+        client = ChatCompletionsClient(PROJECT_ENDPOINT, credential)
+        logger.info("Client initialized successfully using Managed Identity.")
     except Exception as e:
-        logger.error(f"Authentication failed: {e}")
+        logger.error(f"Failed to initialize Azure AI Client: {e}")
         client = None
-    app.run(host="127.0.0.1", port=8080, debug=True, use_reloader=False)
 
-# --- HTML Template ---
+# Initialize client on import
+init_ai_client()
+
+# --- HTML Template (Fabric Data Agent UI) ---
 HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Fabric Data Agent Chat</title>
+<title>Azure AI Foundry Chat</title>
 <style>
 body {
     font-family: Arial, sans-serif;
@@ -185,7 +193,7 @@ textarea {
 </head>
 <body>
     <header>
-        <h1>Fabric Data Agent</h1>
+        <h1>Azure AI Foundry Chat</h1>
         <div style="margin-left:auto;">
             <form action="{{ url_for('clear_chat') }}" method="post">
                 <button type="submit" class="clear-btn">Clear Chat</button>
@@ -203,7 +211,7 @@ textarea {
                 {% endfor %}
             {% else %}
                 <div class="message agent">
-                    <div class="bubble">Hello! I’m your Fabric Data Agent. Ask me something to begin.</div>
+                    <div class="bubble">Hello! I’m your Azure AI Foundry assistant. Ask me something to begin.</div>
                 </div>
             {% endif %}
         </div>
@@ -216,103 +224,85 @@ textarea {
 
 <script>
 const chatBox = document.getElementById('chatBox');
-    const chatForm = document.getElementById('chatForm');
-    const sendBtn = document.getElementById('sendBtn');
-    const textarea = chatForm.querySelector('textarea');
+const chatForm = document.getElementById('chatForm');
+const sendBtn = document.getElementById('sendBtn');
+const textarea = chatForm.querySelector('textarea');
 
-    function scrollToBottom() {
-        chatBox.scrollTop = chatBox.scrollHeight;
-    }
+function scrollToBottom() {
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
 
+scrollToBottom();
+
+chatForm.addEventListener('submit', function(event) {
+    event.preventDefault();
+    const question = textarea.value.trim();
+    if (!question) return;
+
+    sendBtn.disabled = true;
+
+    const userMsgDiv = document.createElement('div');
+    userMsgDiv.className = 'message user';
+    userMsgDiv.innerHTML = <div class="bubble">${escapeHtml(question)}</div>;
+    chatBox.appendChild(userMsgDiv);
     scrollToBottom();
 
-    chatForm.addEventListener('submit', function(event) {
-        event.preventDefault();
-        const question = textarea.value.trim();
-        if (!question) return;
+    const typingDiv = document.createElement('div');
+    typingDiv.className = 'message agent typing-message';
+    typingDiv.innerHTML = '<div class="bubble typing" id="typingBubble">.</div>';
+    chatBox.appendChild(typingDiv);
+    scrollToBottom();
 
-        // Disable send button
-        sendBtn.disabled = true;
+    let dotCount = 1;
+    const typingInterval = setInterval(() => {
+        dotCount = (dotCount % 3) + 1;
+        document.getElementById('typingBubble').textContent = '.'.repeat(dotCount);
+    }, 500);
 
-        // Append user's message immediately
-        const userMsgDiv = document.createElement('div');
-        userMsgDiv.className = 'message user';
-        userMsgDiv.innerHTML = `<div class="bubble">${escapeHtml(question)}</div>`;
-        chatBox.appendChild(userMsgDiv);
+    fetch('{{ url_for("ask") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: question })
+    })
+    .then(response => response.json())
+    .then(data => {
+        clearInterval(typingInterval);
+        chatBox.removeChild(typingDiv);
+
+        const agentMsgDiv = document.createElement('div');
+        agentMsgDiv.className = 'message agent';
+        agentMsgDiv.innerHTML = <div class="bubble">${escapeHtml(data.answer)}</div>;
+        chatBox.appendChild(agentMsgDiv);
+
         scrollToBottom();
+        sendBtn.disabled = false;
+        textarea.value = '';
+        textarea.style.height = 'auto';
+        textarea.focus();
+    })
+    .catch(error => {
+        clearInterval(typingInterval);
+        chatBox.removeChild(typingDiv);
 
-        // Append typing indicator
-        const typingDiv = document.createElement('div');
-        typingDiv.className = 'message agent typing-message';
-        typingDiv.innerHTML = '<div class="bubble typing" id="typingBubble">.</div>';
-        chatBox.appendChild(typingDiv);
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'message agent';
+        errorDiv.innerHTML = <div class="bubble">Error: Unable to get response from the server.</div>;
+        chatBox.appendChild(errorDiv);
+
         scrollToBottom();
-
-        let dotCount = 1;
-        const typingInterval = setInterval(() => {
-            dotCount = (dotCount % 3) + 1;
-            document.getElementById('typingBubble').textContent = '.'.repeat(dotCount);
-        }, 500);
-
-        // Send the question to server via AJAX (fetch)
-        fetch('{{ url_for("ask") }}', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ question: question })
-        })
-        .then(response => response.json())
-        .then(data => {
-            clearInterval(typingInterval);
-
-            // Remove typing indicator
-            chatBox.removeChild(typingDiv);
-
-            // Append agent response
-            const agentMsgDiv = document.createElement('div');
-            agentMsgDiv.className = 'message agent';
-            agentMsgDiv.innerHTML = `<div class="bubble">${escapeHtml(data.answer)}</div>`;
-            chatBox.appendChild(agentMsgDiv);
-
-            // Scroll to bottom and enable send button
-            scrollToBottom();
-            sendBtn.disabled = false;
-            textarea.value = '';
-            textarea.style.height = 'auto';
-            textarea.focus();
-        })
-        .catch(error => {
-            clearInterval(typingInterval);
-            chatBox.removeChild(typingDiv);
-
-            const errorDiv = document.createElement('div');
-            errorDiv.className = 'message agent';
-            errorDiv.innerHTML = `<div class="bubble">Error: Unable to get response from the server.</div>`;
-            chatBox.appendChild(errorDiv);
-
-            scrollToBottom();
-            sendBtn.disabled = false;
-        });
+        sendBtn.disabled = false;
     });
+});
 
-    // Auto-expand textarea
-    textarea.addEventListener('input', function () {
-        this.style.height = 'auto';
-        this.style.height = (this.scrollHeight) + 'px';
-    });
+textarea.addEventListener('input', function () {
+    this.style.height = 'auto';
+    this.style.height = (this.scrollHeight) + 'px';
+});
 
-    // Helper to escape HTML to prevent XSS
-    function escapeHtml(text) {
-        const map = {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#039;'
-        };
-        return text.replace(/[&<>"']/g, function(m) { return map[m]; });
-    }
+function escapeHtml(text) {
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+    return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+}
 </script>
 </body>
 </html>
@@ -322,19 +312,15 @@ const chatBox = document.getElementById('chatBox');
 
 @app.route("/", methods=["GET"])
 def index():
-    if TENANT_ID == "your-tenant-id-here" or DATA_AGENT_URL == "your-data-agent-url-here":
-        return "<h3>Please set TENANT_ID and DATA_AGENT_URL environment variables first.</h3>"
-
     if "chat" not in session:
         session["chat"] = []
-    chat = session["chat"]
-    return render_template_string(HTML, chat=chat)
+    return render_template_string(HTML, chat=session.get("chat", []))
 
 @app.route("/ask", methods=["POST"])
 def ask():
     if client is None:
-        logger.warning("Data Agent client not initialized.")
-        return jsonify({"answer": "Data Agent client is not initialized. Please restart the app."})
+        logger.warning("AI Foundry client not initialized.")
+        return jsonify({"answer": "AI Foundry client is not initialized. Please restart the app."})
 
     data = request.get_json()
     question = data.get("question", "").strip()
@@ -345,13 +331,20 @@ def ask():
     chat.append({"role": "user", "text": question})
 
     try:
-        logger.info("Sending question to Fabric Data Agent.")
-        response = client.ask(question)
-        chat.append({"role": "agent", "text": response})
+        logger.info("Sending question to Azure AI Foundry...")
+        messages = [
+            ChatRequestSystemMessage("You are a helpful assistant."),
+            ChatRequestUserMessage(question)
+        ]
+        options = ChatCompletionsOptions(messages=messages, temperature=0.7, max_tokens=500)
+        response = client.complete(MODEL_DEPLOYMENT_NAME, options)
+
+        answer = response.choices[0].message.content
+        chat.append({"role": "agent", "text": answer})
         session["chat"] = chat
-        return jsonify({"answer": response})
+        return jsonify({"answer": answer})
     except Exception as e:
-        logger.error(f"Error querying the agent: {e}")
+        logger.error(f"Error querying AI Foundry: {e}")
         error_msg = f"Error: {e}"
         chat.append({"role": "agent", "text": error_msg})
         session["chat"] = chat
@@ -361,4 +354,3 @@ def ask():
 def clear_chat():
     session.pop("chat", None)
     return redirect(url_for("index"))
-
